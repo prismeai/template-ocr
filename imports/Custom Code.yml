@@ -1,0 +1,23 @@
+appSlug: Custom Code
+slug: Custom Code
+config:
+  functions:
+    replaceImagesInContext:
+      code: |
+        function replaceImagePlaceholders(inputText, images) {
+          return inputText.replace(/\[image::([^\]]+)\]/gi, (match, imgName) => {
+            const img = images.find(i => i.name === imgName);
+            if (img) {
+              return `[[image\n  description]]${img.text}[[/image description]]`;
+            }
+            return match;
+          });
+        }
+
+        return replaceImagePlaceholders(text, images);
+      language: nodejs
+      parameters:
+        text:
+          type: string
+        images:
+          type: object

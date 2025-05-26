@@ -1,0 +1,85 @@
+slug: ocrDoc
+name: ocr doc
+do:
+  - set:
+      name: document
+      value: '{{payload.document}}'
+  - set:
+      name: updatedImageList
+      value: []
+  - repeat:
+      'on': '{{document.meta.images}}'
+      do:
+        - Knowledge Client.query:
+            text: Analyze my image
+            attachments:
+              - type: image
+                url: '{{item.url}}'
+                mimetype: '{{item.mime_type}}'
+            projectConfigOverride:
+              ai:
+                prompt: >
+                  You are an expert OCR and PDF image analyzer. Each image comes
+                  from a PDF and will be re-injected into document chunks for
+                  RAG.
+
+                  For each image:
+                    1. Identify its type (e.g. “line chart”, “photograph”, “table”, “diagram”, “flow chart”).
+                    2. Provide a concise “alt text” description in markdown form:
+                       - Transcribe any visible text exactly, preserving headings, lists, or table rows.
+                       - If purely decorative or no text is present, output “decorative image—no text.”
+                    3. If the image is a diagram or flow chart, extract its flow:
+                       - List each node or element.
+                       - Describe connections or sequence as markdown bullets like:
+                         - “Step A → Step B → Step C”
+                  Only return the text description; do not add commentary or
+                  assumptions. Keep it brief for embedding.
+                max_tokens: 4000
+                history: false
+                model: gpt-4o
+              embeddings:
+                numberOfSearchResults: 0
+            timeout: 180
+            output: llmResponse
+        - set:
+            name: updatedImage
+            value: '{{item}}'
+        - conditions:
+            '{{llmResponse.answer}}':
+              - set:
+                  name: updatedImage.text
+                  value: '{{llmResponse.answer}}'
+        - set:
+            name: updatedImageList
+            type: push
+            value: '{{updatedImage}}'
+      batch:
+        size: 25
+        interval: 100
+  - set:
+      name: documentText
+      value: '{{document.text}}'
+  - Custom Code.run:
+      function: replaceImagesInContext
+      parameters:
+        text: '{{documentText}}'
+        images: '{{updatedImageList}}'
+      output: replacedDocumentText
+  - set:
+      name: output
+      value:
+        id: '{{document.id}}'
+        name: '{{document.meta.title}}'
+        text: '{{replacedDocumentText}}'
+        tags: '{{document.tags}}'
+        status: published
+        updated_images_debug: '{{updatedImageList}}'
+arguments:
+  payload:
+    document:
+      type: object
+validateArguments: true
+when:
+  events:
+    - doOcrTest
+output: '{{output}}'

@@ -1,0 +1,13 @@
+slug: endpoint
+name: endpoint
+do:
+  - conditions:
+      '{{body.type}} = "documents_updated"':
+        - ocrDoc:
+            payload:
+              document: '{{body.payload.document}}'
+            output: output
+output: '{{output}}'
+validateArguments: true
+when:
+  endpoint: true

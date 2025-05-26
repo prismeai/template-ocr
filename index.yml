@@ -1,0 +1,9 @@
+name: OCR Webhook Example
+slug: ocr-webhook-example
+description: >-
+  A workspace that uses the AIK Webhook to enrich the content of crawled
+  documents.
+photo: 'https://staging-uploads.prisme.ai/7pRTezW/EiYt_AuUH3MYjbE09MdQt.embleme.png'
+labels: []
+customDomains: []
+repositories: {}
