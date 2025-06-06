@@ -1,6 +1,9 @@
 slug: endpoint
 name: endpoint
 do:
+  - set:
+      name: run.startedAt
+      value: '{{run.date}}'
   - conditions:
       '{{body.type}} = "documents_updated"':
         - ocrDoc:

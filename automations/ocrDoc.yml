@@ -7,22 +7,25 @@ do:
   - set:
       name: updatedImageList
       value: []
+  - set:
+      name: failedImages
+      value: []
+  - conditions:
+      '!{{document.meta.images}}':
+        - comment: We can stop, nothing to do as there is no images.
+        - break: {}
   - repeat:
       'on': '{{document.meta.images}}'
       do:
-        - Knowledge Client.query:
-            text: Analyze my image
-            attachments:
-              - type: image
-                url: '{{item.url}}'
-                mimetype: '{{item.mime_type}}'
-            projectConfigOverride:
-              ai:
-                prompt: >
-                  You are an expert OCR and PDF image analyzer. Each image comes
-                  from a PDF and will be re-injected into document chunks for
-                  RAG.
-
+        - Knowledge Client.chat-completion:
+            output: llmResponse
+            model: us.anthropic.claude-3-5-sonnet-20240620-v1:0
+            aiParameters:
+              max_tokens: 4000
+            messages:
+              - role: system
+                content: |
+                  You are an expert OCR and PDF image analyzer. Each image comes from a PDF and will be re-injected into document chunks for RAG.
                   For each image:
                     1. Identify its type (e.g. “line chart”, “photograph”, “table”, “diagram”, “flow chart”).
                     2. Provide a concise “alt text” description in markdown form:
@@ -32,15 +35,20 @@ do:
                        - List each node or element.
                        - Describe connections or sequence as markdown bullets like:
                          - “Step A → Step B → Step C”
-                  Only return the text description; do not add commentary or
-                  assumptions. Keep it brief for embedding.
-                max_tokens: 4000
-                history: false
-                model: gpt-4o
-              embeddings:
-                numberOfSearchResults: 0
-            timeout: 180
-            output: llmResponse
+                  Only return the text description; do not add commentary or assumptions. Keep it brief for embedding.
+              - role: user
+                content:
+                  - type: text
+                    text: Analyze my image
+                  - type: image
+                    url: '{{item.url}}'
+                    mimetype: '{{item.mime_type}}'
+                    ext: '{{item.format}}'
+        - conditions:
+            '{{llmResponse.response}} and !{{llmResponse.answer}}':
+              - set:
+                  name: llmResponse.answer
+                  value: '{{llmResponse.response}}'
         - set:
             name: updatedImage
             value: '{{item}}'
@@ -49,13 +57,18 @@ do:
               - set:
                   name: updatedImage.text
                   value: '{{llmResponse.answer}}'
+            default:
+              - set:
+                  name: failedImages[]
+                  value:
+                    url: '{{item.url}}'
         - set:
             name: updatedImageList
             type: push
             value: '{{updatedImage}}'
       batch:
-        size: 25
-        interval: 100
+        size: 10
+        interval: 500
   - set:
       name: documentText
       value: '{{document.text}}'
@@ -66,20 +79,53 @@ do:
         images: '{{updatedImageList}}'
       output: replacedDocumentText
   - set:
-      name: output
-      value:
+      name: status
+      value: published
+  - conditions:
+      '{{failedImages.length}} > 0':
+        - emit:
+            event: error
+            payload:
+              message: FailedToParseImages
+              images: '{{failedImages}}'
+  - conditions:
+      (date({{run.date}}).ts - date({{run.startedAt}}).ts) > (55 * 1000):
+        - comment: If more than 55 seconds were elapsed since the webhook was activated, we update directly rather than using the webhook behaviour.
+        - Knowledge Client.updateDocument:
+            data:
+              id: '{{document.id}}'
+              content:
+                text: '{{replacedDocumentText}}'
+              tags: '{{document.tags}}'
+              status: '{{status}}'
+            output: output
+        - set:
+            name: processingMethod
+            value: asyncUpdate-aik-client
+      default:
+        - set:
+            name: output
+            value:
+              id: '{{document.id}}'
+              text: '{{replacedDocumentText}}'
+              tags: '{{document.tags}}'
+              status: '{{status}}'
+        - set:
+            name: processingMethod
+            value: syncUpdate-webhook
+  - emit:
+      event: documentProcessed
+      payload:
         id: '{{document.id}}'
         name: '{{document.meta.title}}'
-        text: '{{replacedDocumentText}}'
-        tags: '{{document.tags}}'
-        status: published
-        updated_images_debug: '{{updatedImageList}}'
+        method: '{{processingMethod}}'
+        updated: '{{updatedImageList}}'
+        failed: '{{failedImages}}'
 arguments:
   payload:
     document:
       type: object
 validateArguments: true
 when:
-  events:
-    - doOcrTest
+  events: []
 output: '{{output}}'
